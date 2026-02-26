@@ -18,7 +18,6 @@ const envSchema = z.object({
     AI_API_KEY: z.string().optional(),
     PRIVADO_WEB_WALLET_URL: z.string().url().optional(),
     PRIVADO_VERIFIER_API_BASE_URL: z.string().url().optional(),
-    DATABASE_URL: z.string().optional(),
     NODE_ENV: z.string().optional(),
 });
 

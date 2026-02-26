@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 const router: Router = Router();
 
-import { prisma } from '../lib/db';
+import { db } from '../lib/db';
 
 const VAULT_DATA = [
     {
@@ -25,21 +25,13 @@ router.get('/', async (req, res) => {
         let userPositions: Record<string, number> = {};
 
         if (userId && typeof userId === 'string') {
-            try {
-                const normalizedUserId = userId.toLowerCase();
-                const user = await prisma.user.findUnique({
-                    where: { address: normalizedUserId }
+            const normalizedUserId = userId.toLowerCase();
+            const user = db.findUserByAddress(normalizedUserId);
+            if (user) {
+                const positions = db.getVaultPositions(user.id);
+                positions.forEach(p => {
+                    userPositions[p.vaultId] = p.balance;
                 });
-                if (user) {
-                    const positions = await prisma.vaultPosition.findMany({
-                        where: { userId: user.id }
-                    });
-                    positions.forEach(p => {
-                        userPositions[p.vaultId] = p.balance;
-                    });
-                }
-            } catch (dbError) {
-                console.log('[Vaults] DB query skipped:', (dbError as any).message?.slice(0, 80));
             }
         }
 
@@ -59,42 +51,22 @@ router.post('/withdraw', async (req, res) => {
     try {
         const { userId, vaultAddress, amount } = req.body;
 
-        const position = await prisma.vaultPosition.findUnique({
-            where: {
-                userId_vaultId: {
-                    userId,
-                    vaultId: vaultAddress
-                }
-            }
-        });
-
-        if (!position || position.balance < parseFloat(amount)) {
+        const pos = db.findVaultPosition(userId, vaultAddress);
+        if (!pos || pos.balance < parseFloat(amount)) {
             return res.status(400).json({ error: "Insufficient balance" });
         }
 
-        await prisma.vaultPosition.update({
-            where: {
-                userId_vaultId: {
-                    userId,
-                    vaultId: vaultAddress
-                }
-            },
-            data: {
-                balance: { decrement: parseFloat(amount) }
-            }
-        });
+        db.decrementVaultPosition(userId, vaultAddress, parseFloat(amount));
 
-        // Record transaction
-        await prisma.transaction.create({
-            data: {
-                hash: `mock-withdraw-${Date.now()}`,
-                from: vaultAddress,
-                to: userId,
-                amount: parseFloat(amount),
-                asset: 'USDC',
-                type: 'withdraw',
-                status: 'completed'
-            }
+        db.createTransaction({
+            hash: `withdraw-${Date.now()}`,
+            from: vaultAddress,
+            to: userId,
+            amount: parseFloat(amount),
+            asset: 'USDC',
+            type: 'withdraw',
+            status: 'completed',
+            userId: null
         });
 
         res.json({ success: true });

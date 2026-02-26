@@ -74,7 +74,7 @@ router.post('/resolve-username', (req, res) => {
     res.json({ address: null });
 });
 
-import { prisma } from '../lib/db';
+import { db } from '../lib/db';
 
 router.post('/record', async (req, res) => {
     try {
@@ -85,46 +85,22 @@ router.post('/record', async (req, res) => {
         const normalizedFrom = from.toLowerCase();
         const normalizedTo = to.toLowerCase();
 
-        const transaction = await prisma.transaction.create({
-            data: {
-                hash,
-                from: normalizedFrom,
-                to: normalizedTo,
-                amount: parseFloat(amount),
-                asset,
-                type: type || 'send',
-                status: 'completed'
-            }
+        const transaction = db.createTransaction({
+            hash,
+            from: normalizedFrom,
+            to: normalizedTo,
+            amount: parseFloat(amount),
+            asset,
+            type: type || 'send',
+            status: 'completed',
+            userId: null
         });
 
         // Update vault position if it's a deposit
         if (type === 'deposit') {
             console.log(`[Payment] Updating vault position for ${normalizedFrom} in ${normalizedTo}`);
-
-            // 1. Find or Create User
-            const user = await prisma.user.upsert({
-                where: { address: normalizedFrom },
-                update: {},
-                create: { address: normalizedFrom }
-            });
-
-            // 2. Update Position using User ID
-            await prisma.vaultPosition.upsert({
-                where: {
-                    userId_vaultId: {
-                        userId: user.id,
-                        vaultId: normalizedTo
-                    }
-                },
-                update: {
-                    balance: { increment: parseFloat(amount) }
-                },
-                create: {
-                    userId: user.id,
-                    vaultId: normalizedTo,
-                    balance: parseFloat(amount)
-                }
-            });
+            const user = db.upsertUser(normalizedFrom);
+            db.upsertVaultPosition(user.id, normalizedTo, parseFloat(amount));
         }
 
         res.json({ success: true, transaction });

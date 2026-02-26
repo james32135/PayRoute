@@ -1,12 +1,6 @@
 # ─── PayRoute – Render Deployment Blueprint ───
-# Backend API (Express + Prisma) + PostgreSQL
+# Backend API (Express + JSON file DB)
 # https://render.com/docs/blueprint-spec
-
-databases:
-  - name: payroute-db
-    plan: free
-    databaseName: payroute
-    user: payroute
 
 services:
   - type: web
@@ -14,7 +8,7 @@ services:
     runtime: node
     plan: free
     rootDir: backend
-    buildCommand: npm install --include=dev && npm run build && npx prisma db push --accept-data-loss
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/server.js
     healthCheckPath: /health
     envVars:
@@ -22,10 +16,8 @@ services:
         value: production
       - key: PORT
         value: "10000"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: payroute-db
-          property: connectionString
+      - key: FRONTEND_URL
+        value: https://pay-route.netlify.app
       - key: POLYGON_RPC_URL
         value: https://polygon-bor-rpc.publicnode.com
       - key: POLYGON_CHAIN_ID
