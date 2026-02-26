@@ -6,20 +6,14 @@ import { prisma } from '../lib/db';
 
 const VAULT_DATA = [
     {
-        id: "vault-1",
-        name: "Global USDC Vault",
-        apy: 4.3,
-        tvl: 2400000,
-        utilization: 68,
-        address: "0x742d35Cc6634C0532925a3b844Bc9e7595f11989" // Mock Vault Address
-    },
-    {
-        id: "vault-2",
-        name: "LatAm Remittance Vault",
-        apy: 5.1,
-        tvl: 820000,
-        utilization: 45,
-        address: "0x1234567890123456789012345678901234567890" // Mock Vault Address
+        id: "vault-payroute",
+        name: "PayRoute USDC Vault",
+        apy: 4.8,
+        tvl: 0,
+        utilization: 0,
+        address: "0x86442aF11147A4b32c5577cC701899e7696ca290",
+        symbol: "prUSDC",
+        network: "Polygon"
     }
 ];
 
@@ -31,32 +25,28 @@ router.get('/', async (req, res) => {
         let userPositions: Record<string, number> = {};
 
         if (userId && typeof userId === 'string') {
-            const normalizedUserId = userId.toLowerCase();
-
-            // Find user first
-            const user = await prisma.user.findUnique({
-                where: { address: normalizedUserId }
-            });
-
-            if (user) {
-                const positions = await prisma.vaultPosition.findMany({
-                    where: { userId: user.id }
+            try {
+                const normalizedUserId = userId.toLowerCase();
+                const user = await prisma.user.findUnique({
+                    where: { address: normalizedUserId }
                 });
-                console.log(`[Vaults] Found positions:`, positions);
-                positions.forEach(p => {
-                    userPositions[p.vaultId] = p.balance;
-                });
+                if (user) {
+                    const positions = await prisma.vaultPosition.findMany({
+                        where: { userId: user.id }
+                    });
+                    positions.forEach(p => {
+                        userPositions[p.vaultId] = p.balance;
+                    });
+                }
+            } catch (dbError) {
+                console.log('[Vaults] DB query skipped:', (dbError as any).message?.slice(0, 80));
             }
         }
 
-        const response = VAULT_DATA.map(vault => {
-            // Ensure vault address is compared in lowercase
-            const vaultAddressLower = vault.address.toLowerCase();
-            return {
-                ...vault,
-                userBalance: userPositions[vaultAddressLower] || 0
-            };
-        });
+        const response = VAULT_DATA.map(vault => ({
+            ...vault,
+            userBalance: userPositions[vault.address.toLowerCase()] || 0
+        }));
 
         res.json(response);
     } catch (error) {

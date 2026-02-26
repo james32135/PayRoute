@@ -4,18 +4,17 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { Vault as VaultIcon, ArrowUpRight, ArrowDownRight, Loader2, Wallet } from 'lucide-react';
+import { Vault as VaultIcon, ArrowUpRight, ArrowDownRight, Loader2, Wallet, TrendingUp, Shield, Zap, ExternalLink } from 'lucide-react';
 import { useVaults } from '@/hooks/useVaults';
 import { useAccount, useReadContract, useWriteContract, useSwitchChain } from 'wagmi';
 import { parseUnits, formatUnits, erc20Abi, maxUint256, getAddress } from 'viem';
-import PayRouteRouterABI from '@/lib/abis/PayRouteRouter.json';
-import { apiClient } from '@/lib/apiClient';
+import PayRouteVaultABI from '@/lib/abis/PayRouteVault.json';
 import { CONTRACT_ADDRESSES } from '@/lib/constants';
 
-const ROUTER_ADDRESS = CONTRACT_ADDRESSES.ROUTER;
-const USDC_ADDRESS = CONTRACT_ADDRESSES.USDC;
+const VAULT_ADDRESS = CONTRACT_ADDRESSES.VAULT as `0x${string}`;
+const USDC_ADDRESS = CONTRACT_ADDRESSES.USDC as `0x${string}`;
 const POLYGON_CHAIN_ID = 137;
 
 export default function Vaults() {
@@ -24,216 +23,264 @@ export default function Vaults() {
   const { data: vaults, isLoading, refetch } = useVaults(address);
   const { toast } = useToast();
 
-  const [selectedVault, setSelectedVault] = useState<any>(null);
+  const [showDialog, setShowDialog] = useState(false);
   const [amount, setAmount] = useState('');
-  const [isDepositing, setIsDepositing] = useState(false);
-  const [isWithdrawing, setIsWithdrawing] = useState(false);
-  const [isApproving, setIsApproving] = useState(false);
   const [actionType, setActionType] = useState<'deposit' | 'withdraw'>('deposit');
+  const [processing, setProcessing] = useState(false);
 
-  // Checksum addresses
-  const checksummedRouterAddress = ROUTER_ADDRESS ? getAddress(ROUTER_ADDRESS) : undefined;
-  const checksummedUsdcAddress = USDC_ADDRESS ? getAddress(USDC_ADDRESS) : undefined;
-
-  // Contract Writes
-  const { writeContractAsync: writeApprove } = useWriteContract();
-  const { writeContractAsync: writeSendPayment } = useWriteContract();
-
-  // Allowance Check
-  const { data: allowance, refetch: refetchAllowance } = useReadContract({
-    address: checksummedUsdcAddress,
-    abi: erc20Abi,
-    functionName: 'allowance',
-    args: (address && checksummedRouterAddress) ? [address, checksummedRouterAddress] : undefined,
-    query: { enabled: !!address && !!checksummedUsdcAddress && !!checksummedRouterAddress }
+  // Read on-chain vault data
+  const { data: totalAssets } = useReadContract({
+    address: VAULT_ADDRESS,
+    abi: PayRouteVaultABI.abi,
+    functionName: 'totalAssets',
+    query: { enabled: true },
   });
 
+  const { data: userShares } = useReadContract({
+    address: VAULT_ADDRESS,
+    abi: PayRouteVaultABI.abi,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+    query: { enabled: !!address },
+  });
+
+  const { data: allowance, refetch: refetchAllowance } = useReadContract({
+    address: USDC_ADDRESS,
+    abi: erc20Abi,
+    functionName: 'allowance',
+    args: address ? [address, VAULT_ADDRESS] : undefined,
+    query: { enabled: !!address },
+  });
+
+  const { writeContractAsync } = useWriteContract();
+
+  const tvl = totalAssets ? formatUnits(totalAssets as bigint, 6) : '0';
+  const shares = userShares ? formatUnits(userShares as bigint, 18) : '0';
+
   const handleAction = async () => {
-    if (!address || !amount || !selectedVault) return;
+    if (!address || !amount) return;
 
     if (chainId !== POLYGON_CHAIN_ID) {
       try {
         await switchChainAsync({ chainId: POLYGON_CHAIN_ID });
-      } catch (e) {
+      } catch {
         toast({ title: "Wrong Network", description: "Please switch to Polygon.", variant: "destructive" });
         return;
       }
     }
 
+    setProcessing(true);
     try {
-      if (actionType === 'deposit') {
-        setIsDepositing(true);
-        const parsedAmount = parseUnits(amount, 6);
+      const parsedAmount = parseUnits(amount, 6);
 
-        // 1. Approve
-        if (!allowance || allowance < parsedAmount) {
-          setIsApproving(true);
-          toast({ title: "Approving USDC...", description: "Please confirm approval." });
-          await writeApprove({
-            address: checksummedUsdcAddress!,
+      if (actionType === 'deposit') {
+        // Check allowance & approve if needed
+        if (!allowance || (allowance as bigint) < parsedAmount) {
+          toast({ title: "Approving USDC...", description: "Confirm in your wallet." });
+          await writeContractAsync({
+            address: USDC_ADDRESS,
             abi: erc20Abi,
             functionName: 'approve',
-            args: [checksummedRouterAddress!, maxUint256]
+            args: [VAULT_ADDRESS, maxUint256],
           });
-          setIsApproving(false);
+          await refetchAllowance();
         }
 
-        // 2. Deposit (Send to Vault Address via Router)
         toast({ title: "Depositing...", description: "Confirm transaction." });
-        const txHash = await writeSendPayment({
-          address: checksummedRouterAddress!,
-          abi: PayRouteRouterABI.abi,
-          functionName: 'sendPayment',
-          args: [getAddress(selectedVault.address), parsedAmount, `vault-deposit-${selectedVault.id}`]
+        await writeContractAsync({
+          address: VAULT_ADDRESS,
+          abi: PayRouteVaultABI.abi,
+          functionName: 'deposit',
+          args: [parsedAmount, address],
         });
 
-        // 3. Record
-        toast({ title: "Syncing...", description: "Recording deposit." });
-        await fetch(`${import.meta.env.VITE_PUBLIC_BACKEND_URL}/api/payments/record`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            hash: txHash,
-            from: address,
-            to: selectedVault.address, // Use vault address as ID
-            amount: amount,
-            asset: 'USDC',
-            type: 'deposit'
-          })
-        });
-
-        toast({ title: "Deposit Successful!", description: `You deposited ${amount} USDC.` });
-
+        toast({ title: "Deposit Successful!", description: `Deposited ${amount} USDC into vault.` });
       } else {
-        // Withdraw
-        setIsWithdrawing(true);
-        await apiClient.withdrawFromVault({
-          userId: address,
-          vaultAddress: selectedVault.address,
-          amount: amount
+        toast({ title: "Withdrawing...", description: "Confirm transaction." });
+        await writeContractAsync({
+          address: VAULT_ADDRESS,
+          abi: PayRouteVaultABI.abi,
+          functionName: 'withdraw',
+          args: [parsedAmount, address, address],
         });
-        toast({ title: "Withdrawal Successful!", description: `Withdrew ${amount} USDC.` });
+
+        toast({ title: "Withdrawal Successful!", description: `Withdrew ${amount} USDC from vault.` });
       }
 
       setAmount('');
-      setSelectedVault(null);
-      refetch(); // Refresh vault data
-
+      setShowDialog(false);
+      refetch();
     } catch (error: any) {
-      console.error(error);
-      toast({ title: "Error", description: error.message || "Action failed", variant: "destructive" });
+      toast({ title: "Error", description: error?.shortMessage || "Transaction failed", variant: "destructive" });
     } finally {
-      setIsDepositing(false);
-      setIsWithdrawing(false);
-      setIsApproving(false);
+      setProcessing(false);
     }
   };
 
-  if (isLoading) return <div className="p-8 flex justify-center"><Loader2 className="animate-spin" /></div>;
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="space-y-8"
-    >
+    <div className="space-y-8 animate-in fade-in duration-500">
       {/* Header */}
-      <div className="space-y-4">
-        <h1 className="text-3xl font-display font-bold">Corridor Vaults</h1>
-        <Card className="p-6 glass-card bg-gradient-to-br from-primary/10 to-secondary/10 border-primary/20">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0">
-              <VaultIcon className="w-6 h-6 text-primary" />
-            </div>
-            <div>
-              <h2 className="font-display text-xl font-bold mb-2">Productive liquidity for real payments</h2>
-              <p className="text-muted-foreground">
-                Deposit stablecoins into regional payment corridors. Your capital earns real fees from stablecoin flows.
-              </p>
-            </div>
-          </div>
-        </Card>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Yield Vaults</h1>
+        <p className="text-muted-foreground mt-1">
+          Deposit USDC into ERC-4626 vaults and earn real yield from payment flows
+        </p>
       </div>
 
-      {/* Vaults Grid */}
-      <div className="grid md:grid-cols-2 gap-6">
-        {vaults?.map((vault: any, index: number) => (
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: 'Total Value Locked', value: `$${Number(tvl).toLocaleString(undefined, { maximumFractionDigits: 2 })}`, icon: VaultIcon, color: 'text-primary' },
+          { label: 'Your Shares', value: Number(shares).toFixed(4), icon: Wallet, color: 'text-secondary' },
+          { label: 'Vault APY', value: '4.8%', icon: TrendingUp, color: 'text-emerald-400' },
+          { label: 'Standard', value: 'ERC-4626', icon: Shield, color: 'text-blue-400' },
+        ].map((stat, i) => (
           <motion.div
-            key={vault.id}
-            initial={{ opacity: 0, y: 20 }}
+            key={i}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
+            transition={{ delay: i * 0.05 }}
           >
-            <Card className="p-6 glass-card hover:glow-primary transition-all duration-300 group">
-              <div className="space-y-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-display text-xl font-bold">{vault.name}</h3>
-                    <p className="text-sm text-muted-foreground">Polygon Network</p>
-                  </div>
-                  <div className="text-right">
-                    <h3 className="text-2xl font-bold text-green-500">{vault.apy}%</h3>
-                    <p className="text-xs text-muted-foreground">APY</p>
-                  </div>
+            <Card className="p-5 bg-card/50 border-border/30">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">{stat.label}</p>
+                  <p className="text-2xl font-bold mt-1">{stat.value}</p>
                 </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">TVL</span>
-                    <span className="font-medium">${vault.tvl?.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Your Balance</span>
-                    <span className="font-bold text-primary">{vault.userBalance ? `$${vault.userBalance.toFixed(2)}` : '$0.00'}</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <Dialog open={selectedVault?.id === vault.id} onOpenChange={(open) => !open && setSelectedVault(null)}>
-                    <DialogTrigger asChild>
-                      <Button className="group" size="sm" onClick={() => { setSelectedVault(vault); setActionType('deposit'); }}>
-                        <ArrowUpRight className="w-4 h-4 mr-1" /> Deposit
-                      </Button>
-                    </DialogTrigger>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" size="sm" className="group" onClick={() => { setSelectedVault(vault); setActionType('withdraw'); }}>
-                        <ArrowDownRight className="w-4 h-4 mr-1" /> Withdraw
-                      </Button>
-                    </DialogTrigger>
-
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>{actionType === 'deposit' ? 'Deposit to' : 'Withdraw from'} {vault.name}</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label>Amount (USDC)</Label>
-                          <Input
-                            type="number"
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            placeholder="0.00"
-                          />
-                          <p className="text-xs text-muted-foreground text-right">
-                            {actionType === 'withdraw'
-                              ? `Available: $${vault.userBalance || 0}`
-                              : 'Wallet Balance: Check Wallet'}
-                          </p>
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button onClick={handleAction} disabled={isDepositing || isWithdrawing || isApproving || !amount}>
-                          {isApproving ? 'Approving...' : (isDepositing || isWithdrawing) ? 'Processing...' : 'Confirm'}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+                <div className="w-10 h-10 rounded-lg bg-white/[0.04] flex items-center justify-center">
+                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
                 </div>
               </div>
             </Card>
           </motion.div>
         ))}
       </div>
-    </motion.div>
+
+      {/* Vault Card */}
+      <Card className="p-6 bg-card/50 border-border/30">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shrink-0">
+              <VaultIcon className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold">PayRoute USDC Vault</h2>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium">prUSDC</span>
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">
+                ERC-4626 vault that earns fees from PayRoute payment flows on Polygon
+              </p>
+              <a
+                href={`https://polygonscan.com/address/${VAULT_ADDRESS}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary hover:underline inline-flex items-center gap-1 mt-2"
+              >
+                View on PolygonScan <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </div>
+
+          <div className="flex gap-3 shrink-0">
+            <Button
+              onClick={() => { setActionType('deposit'); setShowDialog(true); }}
+              className="gap-2"
+              disabled={!isConnected}
+            >
+              <ArrowUpRight className="w-4 h-4" /> Deposit
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => { setActionType('withdraw'); setShowDialog(true); }}
+              className="gap-2"
+              disabled={!isConnected}
+            >
+              <ArrowDownRight className="w-4 h-4" /> Withdraw
+            </Button>
+          </div>
+        </div>
+
+        {/* Vault Details Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
+          <div className="rounded-lg bg-white/[0.03] p-4">
+            <p className="text-xs text-muted-foreground">TVL</p>
+            <p className="text-lg font-bold mt-1">${Number(tvl).toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+          </div>
+          <div className="rounded-lg bg-white/[0.03] p-4">
+            <p className="text-xs text-muted-foreground">APY</p>
+            <p className="text-lg font-bold text-emerald-400 mt-1">4.8%</p>
+          </div>
+          <div className="rounded-lg bg-white/[0.03] p-4">
+            <p className="text-xs text-muted-foreground">Your Shares</p>
+            <p className="text-lg font-bold mt-1">{Number(shares).toFixed(4)} prUSDC</p>
+          </div>
+          <div className="rounded-lg bg-white/[0.03] p-4">
+            <p className="text-xs text-muted-foreground">Network</p>
+            <p className="text-lg font-bold mt-1 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-secondary" /> Polygon
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      {/* How it works */}
+      <Card className="p-6 bg-card/30 border-border/30">
+        <h3 className="font-semibold mb-4 flex items-center gap-2">
+          <Zap className="w-4 h-4 text-primary" />
+          How Yield Vaults Work
+        </h3>
+        <div className="grid md:grid-cols-3 gap-6">
+          {[
+            { step: '01', title: 'Deposit USDC', desc: 'Deposit USDC and receive prUSDC vault shares representing your position.' },
+            { step: '02', title: 'Earn Fees', desc: 'The vault collects real fees from PayRoute payment flows. Your shares appreciate over time.' },
+            { step: '03', title: 'Withdraw Anytime', desc: 'Redeem your prUSDC shares for USDC plus accumulated yield. No lockup period.' },
+          ].map((item, i) => (
+            <div key={i} className="flex gap-3">
+              <span className="text-3xl font-bold text-primary/20 shrink-0">{item.step}</span>
+              <div>
+                <h4 className="font-medium text-sm">{item.title}</h4>
+                <p className="text-xs text-muted-foreground mt-1">{item.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Deposit/Withdraw Dialog */}
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {actionType === 'deposit' ? <ArrowUpRight className="w-5 h-5 text-primary" /> : <ArrowDownRight className="w-5 h-5 text-secondary" />}
+              {actionType === 'deposit' ? 'Deposit to Vault' : 'Withdraw from Vault'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Amount (USDC)</Label>
+              <Input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+              />
+              {actionType === 'withdraw' && (
+                <p className="text-xs text-muted-foreground">
+                  Your shares: {Number(shares).toFixed(4)} prUSDC
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
+            <Button onClick={handleAction} disabled={processing || !amount} className="gap-2">
+              {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {processing ? 'Processing...' : 'Confirm'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
