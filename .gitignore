@@ -1,0 +1,55 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+build
+out
+artifacts
+cache
+coverage
+
+# Environment variables (SECRETS)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs
+*.log
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode
+.idea
+
+# Documentation (User Request: Ignore all MD except README and DEPLOYMENT)
+*.md
+!README.md
+!DEPLOYMENT.md
+!judging.md
+
+# Hardhat
+contracts/artifacts
+contracts/cache
+contracts/typechain-types
+
+# Next.js / Vite
+.next
+.swc
+
+# Database
+*.sqlite
+*.sqlite-journal
+DEPLOYMENT.md
+judging.md

@@ -1,0 +1,6 @@
+packages:
+  - 'web'
+  - 'backend'
+  - 'contracts'
+  - 'shared'
+  - 'scripts'

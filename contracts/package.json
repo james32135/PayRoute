@@ -1,0 +1,18 @@
+{
+    "name": "@payroute/contracts",
+    "version": "0.0.1",
+    "private": true,
+    "scripts": {
+        "test": "hardhat test",
+        "compile": "hardhat compile"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+        "ethers": "^6.8.0",
+        "hardhat": "^2.19.0"
+    },
+    "dependencies": {
+        "@iden3/contracts": "^3.1.0",
+        "@openzeppelin/contracts": "^5.4.0"
+    }
+}
