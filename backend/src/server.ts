@@ -11,9 +11,21 @@ import corridorRoutes from './routes/corridors';
 const app: Application = express();
 const port = config.PORT;
 
-// CORS configuration - allow Vercel frontend
+// CORS configuration – allow Netlify + Render + local
+const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:8080',
+    process.env.FRONTEND_URL,                       // set in Render env
+].filter(Boolean) as string[];
+
 const corsOptions = {
-    origin: ['https://payroute.vercel.app', 'http://localhost:5173'],
+    origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+        // allow requests with no origin (mobile, curl, etc)
+        if (!origin) return cb(null, true);
+        if (allowedOrigins.some(o => origin.startsWith(o)) || origin.endsWith('.netlify.app'))
+            return cb(null, true);
+        cb(new Error('CORS not allowed'));
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-owner-address', 'x-agent-address']

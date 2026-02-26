@@ -4,7 +4,8 @@ import { z } from 'zod';
 dotenv.config();
 
 const envSchema = z.object({
-    PORT: z.string().default('3000'),
+    PORT: z.string().default('10000'),
+    FRONTEND_URL: z.string().optional(),
     POLYGON_RPC_URL: z.string().url().optional(),
     POLYGON_CHAIN_ID: z.string().default('137'),
     KATANA_RPC_URL: z.string().url().optional(),

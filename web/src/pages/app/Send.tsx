@@ -30,10 +30,11 @@ import {
 import { parseUnits, formatUnits, erc20Abi, maxUint256, getAddress } from 'viem';
 import PayRouteRouterABI from '@/lib/abis/PayRouteRouter.json';
 import { CONTRACT_ADDRESSES } from '@/lib/constants';
+import { frontendConfig } from '@/lib/env';
 
 const ROUTER_ADDRESS = CONTRACT_ADDRESSES.ROUTER;
 const USDC_ADDRESS = CONTRACT_ADDRESSES.USDC;
-const BACKEND_URL = import.meta.env.VITE_PUBLIC_BACKEND_URL;
+const BACKEND_URL = frontendConfig.backendUrl;
 const POLYGON_CHAIN_ID = 137;
 
 type Asset = 'USDC' | 'POL';

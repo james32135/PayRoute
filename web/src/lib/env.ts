@@ -1,5 +1,5 @@
 export const frontendConfig = {
-    backendUrl: import.meta.env.VITE_API_URL || 'http://localhost:3000',
+    backendUrl: import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:10000'),
     alchemyApiKey: import.meta.env.VITE_PUBLIC_ALCHEMY_API_KEY || '',
     walletConnectProjectId: import.meta.env.VITE_PUBLIC_WALLETCONNECT_PROJECT_ID || '',
     routerAddress: (import.meta.env.VITE_PUBLIC_ROUTER_ADDRESS as `0x${string}`) || '0x85bB3a8b849C0F8cC9664174D60ccfeA5c5C161C',
