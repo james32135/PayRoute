@@ -48,9 +48,7 @@ app.use('/api/corridors', corridorRoutes);
 // Export for Vercel serverless
 export default app;
 
-// Local development server
-if (process.env.NODE_ENV !== 'production') {
-    app.listen(port, () => {
-        console.log(`Server running on port ${port}`);
-    });
-}
+// Start server (works in both dev and production on Render)
+app.listen(port, () => {
+    console.log(`PayRoute API running on port ${port}`);
+});
